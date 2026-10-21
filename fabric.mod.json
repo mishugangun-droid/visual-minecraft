@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "external",
+  "version": "${version}",
+  "name": "External",
+  "description": "Click GUI, chat binds and visual modules.",
+  "authors": ["External"],
+  "license": "All-Rights-Reserved",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["com.external.ExternalClient"]
+  },
+  "depends": {
+    "fabricloader": ">=0.16.10",
+    "minecraft": "~1.21.4",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}
