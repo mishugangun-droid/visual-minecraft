@@ -15,6 +15,7 @@ import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.render.RenderTickCounter;
 import net.minecraft.client.util.InputUtil;
+import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.effect.StatusEffectInstance;
 import net.minecraft.entity.effect.StatusEffects;
 import net.minecraft.text.Text;
@@ -22,7 +23,10 @@ import org.lwjgl.glfw.GLFW;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Locale;
 import java.util.List;
 
 /** EXTERNAL: клик-гуи, бинды командами в чате и визуальные модули. */
@@ -44,12 +48,13 @@ public class ExternalClient implements ClientModInitializer {
 /* ---------------- Модули ---------------- */
 
 class Feature {
-    final String name;
+    final String name, category;
     int key = -1;
-    boolean enabled, wasDown, hasValue;
+    boolean enabled, wasDown, hasValue, open, hudOnly;
     double value, min, max, step;
+    float anim;
 
-    Feature(String name) { this.name = name; }
+    Feature(String name, String category) { this.name = name; this.category = category; }
 
     Feature range(double v, double mn, double mx, double st) {
         hasValue = true; value = v; min = mn; max = mx; step = st;
@@ -63,6 +68,7 @@ class Feature {
         enabled = e;
         MinecraftClient mc = MinecraftClient.getInstance();
         if (e) onEnable(mc); else onDisable(mc);
+        Config.save();
     }
 
     void onEnable(MinecraftClient mc) {}
@@ -70,12 +76,12 @@ class Feature {
     void onTick(MinecraftClient mc) {}
 }
 
-class HudModule extends Feature {
-    HudModule() { super("HUD"); }
+class HudFeature extends Feature {
+    HudFeature(String name) { super(name, "HUD"); hudOnly = true; }
 }
 
 class Fullbright extends Feature {
-    Fullbright() { super("Fullbright"); }
+    Fullbright() { super("Fullbright", "Visual"); }
 
     @Override void onTick(MinecraftClient mc) {
         if (mc.player != null) {
@@ -93,7 +99,7 @@ class Fullbright extends Feature {
 class FovBase extends Feature {
     Integer old;
 
-    FovBase(String name) { super(name); }
+    FovBase(String name) { super(name, "Visual"); }
 
     @Override void onEnable(MinecraftClient mc) {
         old = mc.options.getFov().getValue();
@@ -119,16 +125,30 @@ class Fov extends FovBase {
 }
 
 final class Modules {
+    static final String[] CATS = {"Visual", "HUD"};
     static final List<Feature> ALL = new ArrayList<>();
-    static HudModule HUD;
+    static HudFeature WATERMARK, LIST, COORDS, DIR, SPEED, CLOCK, KEYS, ARMOR;
+    static double speed, lastX, lastZ;
+
+    static HudFeature hud(String n, boolean on) {
+        HudFeature f = new HudFeature(n);
+        f.enabled = on;
+        ALL.add(f);
+        return f;
+    }
 
     static void init() {
-        HUD = new HudModule();
-        HUD.enabled = true;
-        ALL.add(HUD);
         ALL.add(new Fullbright());
         ALL.add(new Zoom());
         ALL.add(new Fov());
+        WATERMARK = hud("Watermark", true);
+        LIST = hud("ArrayList", true);
+        COORDS = hud("Coordinates", false);
+        DIR = hud("Direction", false);
+        SPEED = hud("Speed", false);
+        CLOCK = hud("Clock", false);
+        KEYS = hud("Keystrokes", false);
+        ARMOR = hud("Armor", false);
     }
 
     static Feature find(String n) {
@@ -136,8 +156,19 @@ final class Modules {
         return null;
     }
 
+    static List<Feature> in(String cat) {
+        List<Feature> r = new ArrayList<>();
+        for (Feature f : ALL) if (f.category.equals(cat)) r.add(f);
+        return r;
+    }
+
     static void tick(MinecraftClient mc) {
         if (mc.getWindow() == null) return;
+        if (mc.player != null) {
+            speed = Math.hypot(mc.player.getX() - lastX, mc.player.getZ() - lastZ) * 20.0;
+            lastX = mc.player.getX();
+            lastZ = mc.player.getZ();
+        }
         for (Feature f : ALL) {
             if (f.enabled) f.onTick(mc);
             if (f.key != -1 && mc.currentScreen == null) {
@@ -275,6 +306,7 @@ final class Config {
                 JsonObject o = new JsonObject();
                 o.addProperty("key", f.key);
                 if (f.hasValue) o.addProperty("value", f.value);
+                if (f.hudOnly) o.addProperty("enabled", f.enabled);
                 root.add(f.name, o);
             }
             Files.writeString(file(), new GsonBuilder().setPrettyPrinting().create().toJson(root));
@@ -291,6 +323,7 @@ final class Config {
                 JsonObject o = root.getAsJsonObject(f.name);
                 if (o.has("key")) f.key = o.get("key").getAsInt();
                 if (f.hasValue && o.has("value")) f.value = o.get("value").getAsDouble();
+                if (f.hudOnly && o.has("enabled")) f.enabled = o.get("enabled").getAsBoolean();
             }
         } catch (Exception ignored) {}
     }
@@ -299,92 +332,231 @@ final class Config {
 /* ---------------- HUD ---------------- */
 
 final class Hud {
+    static final DateTimeFormatter HM = DateTimeFormatter.ofPattern("HH:mm");
+    static final int BG = 0xB0111528, ACCENT = 0xFF8A5CFF, WHITE = 0xFFFFFFFF, GRAY = 0xFF7A8099;
+
     static void render(DrawContext ctx, RenderTickCounter tc) {
         MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.options.hudHidden || !Modules.HUD.enabled) return;
+        if (mc.options.hudHidden || mc.player == null) return;
+        var tr = mc.textRenderer;
+        int w = ctx.getScaledWindowWidth(), h = ctx.getScaledWindowHeight();
+
+        if (Modules.WATERMARK.enabled) watermark(ctx, mc);
+
+        // ArrayList справа сверху
+        if (Modules.LIST.enabled) {
+            int y = 4;
+            for (Feature f : Modules.ALL) {
+                if (!f.enabled || f.hudOnly) continue;
+                int tw = tr.getWidth(f.name);
+                ctx.fill(w - tw - 10, y, w - 2, y + 11, BG);
+                ctx.fill(w - 2, y, w, y + 11, ACCENT);
+                ctx.drawTextWithShadow(tr, f.name, w - tw - 6, y + 2, WHITE);
+                y += 11;
+            }
+        }
+
+        // Информационный блок слева снизу
+        List<String> lines = new ArrayList<>();
+        var p = mc.player;
+        if (Modules.COORDS.enabled)
+            lines.add(String.format(Locale.ROOT, "XYZ  %.1f  %.1f  %.1f", p.getX(), p.getY(), p.getZ()));
+        if (Modules.DIR.enabled) {
+            String d = p.getHorizontalFacing().asString();
+            lines.add("Facing  " + Character.toUpperCase(d.charAt(0)) + d.substring(1));
+        }
+        if (Modules.SPEED.enabled)
+            lines.add(String.format(Locale.ROOT, "Speed  %.1f b/s", Modules.speed));
+        if (Modules.CLOCK.enabled)
+            lines.add("Time  " + LocalTime.now().format(HM));
+        int top = h - 4;
+        if (!lines.isEmpty()) {
+            int mw = 0;
+            for (String s : lines) mw = Math.max(mw, tr.getWidth(s));
+            int bh = lines.size() * 11 + 4;
+            top = h - 4 - bh;
+            ctx.fill(4, top, 4 + mw + 12, top + bh, BG);
+            ctx.fill(4, top, 6, top + bh, ACCENT);
+            for (int i = 0; i < lines.size(); i++)
+                ctx.drawTextWithShadow(tr, lines.get(i), 10, top + 4 + i * 11, WHITE);
+        }
+
+        // Keystrokes над информационным блоком
+        if (Modules.KEYS.enabled) {
+            int ky = top - 6 - 36;
+            key(ctx, tr, 23, ky, "W", mc.options.forwardKey.isPressed());
+            key(ctx, tr, 4, ky + 19, "A", mc.options.leftKey.isPressed());
+            key(ctx, tr, 23, ky + 19, "S", mc.options.backKey.isPressed());
+            key(ctx, tr, 42, ky + 19, "D", mc.options.rightKey.isPressed());
+        }
+
+        // Броня справа по центру
+        if (Modules.ARMOR.enabled) {
+            EquipmentSlot[] slots = {EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET};
+            for (int i = 0; i < slots.length; i++) {
+                var st = p.getEquippedStack(slots[i]);
+                if (!st.isEmpty()) ctx.drawItem(st, w - 22, h / 2 - 32 + i * 17);
+            }
+        }
+    }
+
+    static void watermark(DrawContext ctx, MinecraftClient mc) {
         var tr = mc.textRenderer;
         var nh = mc.getNetworkHandler();
         var entry = (nh != null && mc.player != null) ? nh.getPlayerListEntry(mc.player.getUuid()) : null;
         int ping = entry != null ? entry.getLatency() : 0;
         String a = mc.getCurrentFps() + " FPS", sep = " | ", b = "EXTERNAL", c = ping + " ms";
         int width = tr.getWidth(a) + tr.getWidth(sep) * 2 + tr.getWidth(b) + tr.getWidth(c) + 14;
-        ctx.fill(4, 4, 4 + width, 20, 0xB0111528);
-        ctx.fill(4, 4, 6, 20, 0xFF8A5CFF);
+        ctx.fill(4, 4, 4 + width, 20, BG);
+        ctx.fill(4, 4, 6, 20, ACCENT);
         int x = 11;
-        ctx.drawTextWithShadow(tr, a, x, 8, 0xFFFFFFFF); x += tr.getWidth(a);
-        ctx.drawTextWithShadow(tr, sep, x, 8, 0xFF7A8099); x += tr.getWidth(sep);
-        ctx.drawTextWithShadow(tr, b, x, 8, 0xFF8A5CFF); x += tr.getWidth(b);
-        ctx.drawTextWithShadow(tr, sep, x, 8, 0xFF7A8099); x += tr.getWidth(sep);
-        ctx.drawTextWithShadow(tr, c, x, 8, 0xFFFFFFFF);
-        int w = ctx.getScaledWindowWidth(), y = 24;
-        for (Feature f : Modules.ALL) {
-            if (!f.enabled || f == Modules.HUD) continue;
-            ctx.drawTextWithShadow(mc.textRenderer, f.name, w - mc.textRenderer.getWidth(f.name) - 4, y, 0xFFFFFFFF);
-            y += 10;
-        }
+        ctx.drawTextWithShadow(tr, a, x, 8, WHITE); x += tr.getWidth(a);
+        ctx.drawTextWithShadow(tr, sep, x, 8, GRAY); x += tr.getWidth(sep);
+        ctx.drawTextWithShadow(tr, b, x, 8, ACCENT); x += tr.getWidth(b);
+        ctx.drawTextWithShadow(tr, sep, x, 8, GRAY); x += tr.getWidth(sep);
+        ctx.drawTextWithShadow(tr, c, x, 8, WHITE);
+    }
+
+    static void key(DrawContext ctx, net.minecraft.client.font.TextRenderer tr, int x, int y, String s, boolean down) {
+        ctx.fill(x, y, x + 17, y + 17, down ? 0xCC8A5CFF : BG);
+        ctx.drawTextWithShadow(tr, s, x + (17 - tr.getWidth(s)) / 2, y + 5, WHITE);
     }
 }
 
 /* ---------------- Клик-гуи ---------------- */
 
 class ClickGuiScreen extends Screen {
-    private static final int W = 220, ROW = 22, HEAD = 26;
-    private Feature listening;
+    private static final int PW = 112, HEAD = 20, ROW = 18, SUB = 16;
+    private static final int[] PX = new int[2], PY = new int[2];
+    private static boolean placed;
+    private final long t0 = System.currentTimeMillis();
+    private Feature listening, sliding;
+    private int slidingPanel, dragPanel = -1;
+    private double dragDx, dragDy;
 
     ClickGuiScreen() { super(Text.literal("External")); }
 
+    @Override protected void init() {
+        if (!placed) {
+            int total = Modules.CATS.length * PW + (Modules.CATS.length - 1) * 10;
+            for (int i = 0; i < Modules.CATS.length; i++) {
+                PX[i] = width / 2 - total / 2 + i * (PW + 10);
+                PY[i] = Math.max(10, height / 2 - 90);
+            }
+            placed = true;
+        }
+    }
+
     @Override public boolean shouldPause() { return false; }
 
-    private int left() { return width / 2 - W / 2; }
-    private int top() { return height / 2 - (HEAD + ROW * Modules.ALL.size()) / 2; }
+    private float alpha() { return Math.max(0.05f, Math.min(1f, (System.currentTimeMillis() - t0) / 180f)); }
+    private static int argb(float a, int rgb) { return ((int) (Math.max(0f, Math.min(1f, a)) * 255) << 24) | (rgb & 0xFFFFFF); }
+    private static int rowH(Feature f) { return ROW + (f.open ? (f.hasValue ? SUB : 0) + SUB : 0); }
 
-    private Feature rowAt(double mx, double my) {
-        if (mx < left() || mx > left() + W || my < top() + HEAD) return null;
-        int i = (int) ((my - top() - HEAD) / ROW);
-        return i >= 0 && i < Modules.ALL.size() ? Modules.ALL.get(i) : null;
+    private void setSlider(Feature f, double mx, int panel) {
+        double t = Math.max(0, Math.min(1, (mx - (PX[panel] + 8)) / (PW - 16)));
+        double v = f.min + Math.round((f.min + t * (f.max - f.min) - f.min) / f.step) * f.step;
+        f.value = Math.max(f.min, Math.min(f.max, v));
     }
 
     @Override
     public void render(DrawContext c, int mx, int my, float delta) {
         super.render(c, mx, my, delta);
-        int x = left(), y = top(), h = HEAD + ROW * Modules.ALL.size();
-        c.fill(x - 2, y - 2, x + W + 2, y + h + 2, 0xFF8A5CFF);
-        c.fill(x, y, x + W, y + h, 0xF0111528);
-        c.drawTextWithShadow(textRenderer, "EXTERNAL", x + 8, y + 9, 0xFF8A5CFF);
-        Feature hover = rowAt(mx, my);
-        for (int i = 0; i < Modules.ALL.size(); i++) {
-            Feature f = Modules.ALL.get(i);
-            int ry = y + HEAD + i * ROW;
-            if (f.enabled) c.fill(x, ry, x + W, ry + ROW, 0x558A5CFF);
-            if (f == hover) c.fill(x, ry, x + W, ry + ROW, 0x22FFFFFF);
-            c.drawTextWithShadow(textRenderer, f.name, x + 8, ry + 7, f.enabled ? 0xFFFFFFFF : 0xFF9AA0B5);
-            String r = (f.hasValue ? (int) f.value + "  " : "")
-                    + (listening == f ? "[...]" : "[" + Commands.keyName(f.key) + "]");
-            c.drawTextWithShadow(textRenderer, r, x + W - 8 - textRenderer.getWidth(r), ry + 7, 0xFF4FC3FF);
+        float al = alpha();
+        c.fill(0, 0, width, height, argb(al * 0.40f, 0x000000));
+        for (int p = 0; p < Modules.CATS.length; p++) {
+            int x = PX[p], y = PY[p];
+            List<Feature> fs = Modules.in(Modules.CATS[p]);
+            int h = HEAD;
+            for (Feature f : fs) h += rowH(f);
+            c.fill(x - 1, y - 1, x + PW + 1, y + h + 1, argb(al * 0.8f, 0x8A5CFF));
+            c.fill(x, y, x + PW, y + h, argb(al * 0.95f, 0x111528));
+            c.fillGradient(x, y, x + PW, y + HEAD, argb(al, 0x7C54F0), argb(al, 0x3B2A8F));
+            c.drawTextWithShadow(textRenderer, Modules.CATS[p].toUpperCase(), x + 8, y + 6, argb(al, 0xFFFFFF));
+            int ry = y + HEAD;
+            for (Feature f : fs) {
+                f.anim += ((f.enabled ? 1f : 0f) - f.anim) * 0.3f;
+                boolean hov = mx >= x && mx < x + PW && my >= ry && my < ry + ROW;
+                c.fill(x, ry, x + PW, ry + ROW, argb(al * (0.10f + 0.55f * f.anim), f.anim > 0.02f ? 0x8A5CFF : 0x000000));
+                if (hov) c.fill(x, ry, x + PW, ry + ROW, argb(al * 0.12f, 0xFFFFFF));
+                if (f.anim > 0.02f) c.fill(x, ry, x + 2, ry + ROW, argb(al * f.anim, 0x4FC3FF));
+                c.drawTextWithShadow(textRenderer, f.name, x + 8, ry + 5, argb(al, f.enabled ? 0xFFFFFF : 0x9AA0B5));
+                String mark = f.open ? "-" : "+";
+                c.drawTextWithShadow(textRenderer, mark, x + PW - 10, ry + 5, argb(al, 0x7A8099));
+                int y2 = ry + ROW;
+                if (f.open) {
+                    c.fill(x, y2, x + PW, ry + rowH(f), argb(al * 0.5f, 0x000000));
+                    if (f.hasValue) {
+                        double t = (f.value - f.min) / (f.max - f.min);
+                        c.drawTextWithShadow(textRenderer, String.valueOf((int) f.value), x + 8, y2 + 1, argb(al, 0xFFFFFF));
+                        c.fill(x + 8, y2 + 11, x + PW - 8, y2 + 13, argb(al, 0x2A2F4A));
+                        c.fill(x + 8, y2 + 11, x + 8 + (int) ((PW - 16) * t), y2 + 13, argb(al, 0x8A5CFF));
+                        c.fill(x + 6 + (int) ((PW - 16) * t), y2 + 9, x + 10 + (int) ((PW - 16) * t), y2 + 15, argb(al, 0xFFFFFF));
+                        y2 += SUB;
+                    }
+                    String b = listening == f ? "Bind: ..." : "Bind: " + Commands.keyName(f.key);
+                    c.drawTextWithShadow(textRenderer, b, x + 8, y2 + 4, argb(al, 0x4FC3FF));
+                }
+                ry += rowH(f);
+            }
         }
-        c.drawTextWithShadow(textRenderer, "LMB toggle | RMB bind | wheel value", x, y + h + 8, 0xFF7A8099);
+        c.drawTextWithShadow(textRenderer, "LMB toggle | RMB settings | drag header to move",
+                width / 2 - 120, height - 14, argb(al, 0x7A8099));
     }
 
     @Override
-    public boolean mouseClicked(double mx, double my, int button) {
-        Feature f = rowAt(mx, my);
-        if (f != null) {
-            if (button == 0) f.toggle();
-            else if (button == 1) listening = (listening == f) ? null : f;
-            return true;
+    public boolean mouseClicked(double mx, double my, int btn) {
+        for (int p = 0; p < Modules.CATS.length; p++) {
+            int x = PX[p], y = PY[p];
+            if (mx < x || mx > x + PW) continue;
+            if (my >= y && my < y + HEAD) {
+                if (btn == 0) { dragPanel = p; dragDx = mx - x; dragDy = my - y; }
+                return true;
+            }
+            int ry = y + HEAD;
+            for (Feature f : Modules.in(Modules.CATS[p])) {
+                if (my >= ry && my < ry + ROW) {
+                    if (btn == 0) f.toggle();
+                    else if (btn == 1) f.open = !f.open;
+                    return true;
+                }
+                int y2 = ry + ROW;
+                if (f.open) {
+                    if (f.hasValue) {
+                        if (my >= y2 && my < y2 + SUB) {
+                            if (btn == 0) { sliding = f; slidingPanel = p; setSlider(f, mx, p); }
+                            return true;
+                        }
+                        y2 += SUB;
+                    }
+                    if (my >= y2 && my < y2 + SUB) {
+                        if (btn == 0) listening = f;
+                        return true;
+                    }
+                }
+                ry += rowH(f);
+            }
         }
-        return super.mouseClicked(mx, my, button);
+        return super.mouseClicked(mx, my, btn);
     }
 
     @Override
-    public boolean mouseScrolled(double mx, double my, double hAmount, double vAmount) {
-        Feature f = rowAt(mx, my);
-        if (f != null && f.hasValue) {
-            f.value = Math.max(f.min, Math.min(f.max, f.value + Math.signum(vAmount) * f.step));
-            Config.save();
+    public boolean mouseDragged(double mx, double my, int btn, double dx, double dy) {
+        if (dragPanel >= 0) {
+            PX[dragPanel] = (int) (mx - dragDx);
+            PY[dragPanel] = (int) (my - dragDy);
             return true;
         }
-        return super.mouseScrolled(mx, my, hAmount, vAmount);
+        if (sliding != null) { setSlider(sliding, mx, slidingPanel); return true; }
+        return super.mouseDragged(mx, my, btn, dx, dy);
+    }
+
+    @Override
+    public boolean mouseReleased(double mx, double my, int btn) {
+        if (sliding != null) Config.save();
+        dragPanel = -1;
+        sliding = null;
+        return super.mouseReleased(mx, my, btn);
     }
 
     @Override
