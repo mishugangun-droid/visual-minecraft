@@ -502,3 +502,95 @@ class ClickGuiScreen extends Screen {
                 c.drawTextWithShadow(textRenderer, f.name, x + 10, ry + 5, argb(al, col));
                 if (f.enabled) check(c, x + PW - 17, ry + 5, argb(al, 0xB57CFF));
                 else if (f.hasValue) c.drawTextWithShadow(textRenderer, f.open ? "-" : "+", x + PW - 15, ry + 5, argb(al, 0x6B5C8F));
+                int y2 = ry + ROW;
+                if (f.open) {
+                    rrect(c, x + 4, y2, x + PW - 4, ry + rowH(f), 4, argb(al * 0.6f, 0x0A0418));
+                    if (f.hasValue) {
+                        double t = (f.value - f.min) / (f.max - f.min);
+                        int tx1 = x + 10, tx2 = x + PW - 10, kx = tx1 + (int) ((tx2 - tx1) * t);
+                        c.drawTextWithShadow(textRenderer, String.valueOf((int) f.value), x + 10, y2 + 1, argb(al, 0xFFFFFF));
+                        c.fill(tx1, y2 + 11, tx2, y2 + 13, argb(al, 0x2E2150));
+                        c.fill(tx1, y2 + 11, kx, y2 + 13, argb(al, 0xA678FF));
+                        rrect(c, kx - 2, y2 + 9, kx + 2, y2 + 15, 2, argb(al, 0xFFFFFF));
+                        y2 += SUB;
+                    }
+                    String b = listening == f ? "Bind: ..." : "Bind: " + Commands.keyName(f.key);
+                    c.drawTextWithShadow(textRenderer, b, x + 10, y2 + 4, argb(al, 0xA678FF));
+                }
+                ry += rowH(f);
+            }
+        }
+        c.drawTextWithShadow(textRenderer, "LMB toggle | RMB settings | drag header to move",
+                width / 2 - 120, height - 14, argb(al, 0x8A78B8));
+    }
+
+    @Override
+    public boolean mouseClicked(double mx, double my, int btn) {
+        for (int p = 0; p < Modules.CATS.length; p++) {
+            int x = PX[p], y = PY[p];
+            if (mx < x || mx > x + PW) continue;
+            if (my >= y && my < y + HEAD) {
+                if (btn == 0) { dragPanel = p; dragDx = mx - x; dragDy = my - y; }
+                return true;
+            }
+            int ry = y + HEAD;
+            for (Feature f : Modules.in(Modules.CATS[p])) {
+                if (my >= ry && my < ry + ROW) {
+                    if (btn == 0) f.toggle();
+                    else if (btn == 1) f.open = !f.open;
+                    return true;
+                }
+                int y2 = ry + ROW;
+                if (f.open) {
+                    if (f.hasValue) {
+                        if (my >= y2 && my < y2 + SUB) {
+                            if (btn == 0) { sliding = f; slidingPanel = p; setSlider(f, mx, p); }
+                            return true;
+                        }
+                        y2 += SUB;
+                    }
+                    if (my >= y2 && my < y2 + SUB) {
+                        if (btn == 0) listening = f;
+                        return true;
+                    }
+                }
+                ry += rowH(f);
+            }
+        }
+        return super.mouseClicked(mx, my, btn);
+    }
+
+    @Override
+    public boolean mouseDragged(double mx, double my, int btn, double dx, double dy) {
+        if (dragPanel >= 0) {
+            PX[dragPanel] = (int) (mx - dragDx);
+            PY[dragPanel] = (int) (my - dragDy);
+            return true;
+        }
+        if (sliding != null) { setSlider(sliding, mx, slidingPanel); return true; }
+        return super.mouseDragged(mx, my, btn, dx, dy);
+    }
+
+    @Override
+    public boolean mouseReleased(double mx, double my, int btn) {
+        if (sliding != null) Config.save();
+        dragPanel = -1;
+        sliding = null;
+        return super.mouseReleased(mx, my, btn);
+    }
+
+    @Override
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (listening != null) {
+            listening.key = keyCode == GLFW.GLFW_KEY_ESCAPE ? -1 : keyCode;
+            listening = null;
+            Config.save();
+            return true;
+        }
+        if (ExternalClient.guiKey.matchesKey(keyCode, scanCode)) {
+            close();
+            return true;
+        }
+        return super.keyPressed(keyCode, scanCode, modifiers);
+    }
+}
