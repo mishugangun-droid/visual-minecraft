@@ -302,8 +302,21 @@ final class Hud {
     static void render(DrawContext ctx, RenderTickCounter tc) {
         MinecraftClient mc = MinecraftClient.getInstance();
         if (mc.options.hudHidden || !Modules.HUD.enabled) return;
-        ctx.drawTextWithShadow(mc.textRenderer, "EXTERNAL", 4, 4, 0xFF8A5CFF);
-        int w = ctx.getScaledWindowWidth(), y = 4;
+        var tr = mc.textRenderer;
+        var nh = mc.getNetworkHandler();
+        var entry = (nh != null && mc.player != null) ? nh.getPlayerListEntry(mc.player.getUuid()) : null;
+        int ping = entry != null ? entry.getLatency() : 0;
+        String a = mc.getCurrentFps() + " FPS", sep = " | ", b = "EXTERNAL", c = ping + " ms";
+        int width = tr.getWidth(a) + tr.getWidth(sep) * 2 + tr.getWidth(b) + tr.getWidth(c) + 14;
+        ctx.fill(4, 4, 4 + width, 20, 0xB0111528);
+        ctx.fill(4, 4, 6, 20, 0xFF8A5CFF);
+        int x = 11;
+        ctx.drawTextWithShadow(tr, a, x, 8, 0xFFFFFFFF); x += tr.getWidth(a);
+        ctx.drawTextWithShadow(tr, sep, x, 8, 0xFF7A8099); x += tr.getWidth(sep);
+        ctx.drawTextWithShadow(tr, b, x, 8, 0xFF8A5CFF); x += tr.getWidth(b);
+        ctx.drawTextWithShadow(tr, sep, x, 8, 0xFF7A8099); x += tr.getWidth(sep);
+        ctx.drawTextWithShadow(tr, c, x, 8, 0xFFFFFFFF);
+        int w = ctx.getScaledWindowWidth(), y = 24;
         for (Feature f : Modules.ALL) {
             if (!f.enabled || f == Modules.HUD) continue;
             ctx.drawTextWithShadow(mc.textRenderer, f.name, w - mc.textRenderer.getWidth(f.name) - 4, y, 0xFFFFFFFF);
