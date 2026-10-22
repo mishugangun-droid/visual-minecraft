@@ -12,19 +12,23 @@ import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.option.CloudRenderMode;
 import net.minecraft.client.option.KeyBinding;
+import net.minecraft.client.option.ParticlesMode;
 import net.minecraft.client.render.RenderTickCounter;
 import net.minecraft.client.util.InputUtil;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.effect.StatusEffectInstance;
 import net.minecraft.entity.effect.StatusEffects;
 import net.minecraft.text.Text;
+import net.minecraft.util.Formatting;
 import org.lwjgl.glfw.GLFW;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Locale;
 import java.util.List;
@@ -53,8 +57,11 @@ class Feature {
     boolean enabled, wasDown, hasValue, open, hudOnly;
     double value, min, max, step;
     float anim;
+    String desc;
 
     Feature(String name, String category) { this.name = name; this.category = category; }
+
+    Feature d(String s) { desc = s; return this; }
 
     Feature range(double v, double mn, double mx, double st) {
         hasValue = true; value = v; min = mn; max = mx; step = st;
@@ -77,11 +84,11 @@ class Feature {
 }
 
 class HudFeature extends Feature {
-    HudFeature(String name) { super(name, "HUD"); hudOnly = true; }
+    HudFeature(String name, String cat) { super(name, cat); hudOnly = true; }
 }
 
 class Fullbright extends Feature {
-    Fullbright() { super("Fullbright", "Visual"); }
+    Fullbright() { super("Fullbright", "Visuals"); }
 
     @Override void onTick(MinecraftClient mc) {
         if (mc.player != null) {
@@ -99,7 +106,7 @@ class Fullbright extends Feature {
 class FovBase extends Feature {
     Integer old;
 
-    FovBase(String name) { super(name, "Visual"); }
+    FovBase(String name) { super(name, "Visuals"); }
 
     @Override void onEnable(MinecraftClient mc) {
         old = mc.options.getFov().getValue();
@@ -116,6 +123,60 @@ class FovBase extends Feature {
     void apply(MinecraftClient mc) { mc.options.getFov().setValue((int) value); }
 }
 
+class NoBob extends Feature {
+    Boolean old;
+    NoBob() { super("NoBob", "Performance"); }
+    @Override void onEnable(MinecraftClient mc) {
+        old = mc.options.getBobView().getValue();
+        mc.options.getBobView().setValue(false);
+    }
+    @Override void onDisable(MinecraftClient mc) {
+        if (old != null) mc.options.getBobView().setValue(old);
+        old = null;
+    }
+}
+
+class NoClouds extends Feature {
+    CloudRenderMode old;
+    NoClouds() { super("NoClouds", "Performance"); }
+    @Override void onEnable(MinecraftClient mc) {
+        old = mc.options.getCloudRenderMode().getValue();
+        mc.options.getCloudRenderMode().setValue(CloudRenderMode.OFF);
+    }
+    @Override void onDisable(MinecraftClient mc) {
+        if (old != null) mc.options.getCloudRenderMode().setValue(old);
+        old = null;
+    }
+}
+
+class MinParticles extends Feature {
+    ParticlesMode old;
+    MinParticles() { super("Particles", "Performance"); }
+    @Override void onEnable(MinecraftClient mc) {
+        old = mc.options.getParticles().getValue();
+        mc.options.getParticles().setValue(ParticlesMode.MINIMAL);
+    }
+    @Override void onDisable(MinecraftClient mc) {
+        if (old != null) mc.options.getParticles().setValue(old);
+        old = null;
+    }
+}
+
+class RenderDist extends Feature {
+    Integer old;
+    RenderDist() { super("RenderDist", "Performance"); range(8, 2, 32, 1); }
+    @Override void onEnable(MinecraftClient mc) { old = mc.options.getViewDistance().getValue(); apply(mc); }
+    @Override void onTick(MinecraftClient mc) { apply(mc); }
+    void apply(MinecraftClient mc) {
+        int v = (int) value;
+        if (mc.options.getViewDistance().getValue() != v) mc.options.getViewDistance().setValue(v);
+    }
+    @Override void onDisable(MinecraftClient mc) {
+        if (old != null) mc.options.getViewDistance().setValue(old);
+        old = null;
+    }
+}
+
 class Zoom extends FovBase {
     Zoom() { super("Zoom"); range(30, 30, 80, 5); }
 }
@@ -124,31 +185,52 @@ class Fov extends FovBase {
     Fov() { super("FOV"); range(100, 70, 110, 5); }
 }
 
+final class Theme {
+    static final int[] COLORS = {0xA678FF, 0x4FC3FF, 0xFF6EB4, 0x5CFFA0, 0xFFA05C};
+    static int idx = 0;
+    static int rgb() { return COLORS[idx]; }
+    static int argb() { return 0xFF000000 | rgb(); }
+    static int light() {
+        int c = rgb();
+        int r = ((c >> 16) & 255), g = ((c >> 8) & 255), b = (c & 255);
+        return ((r + (255 - r) / 4) << 16) | ((g + (255 - g) / 4) << 8) | (b + (255 - b) / 4);
+    }
+}
+
 final class Modules {
-    static final String[] CATS = {"Visual", "HUD"};
+    static final String[] CATS = {"Visuals", "Performance", "Interface", "Info"};
     static final List<Feature> ALL = new ArrayList<>();
-    static HudFeature WATERMARK, LIST, COORDS, DIR, SPEED, CLOCK, KEYS, ARMOR;
+    static HudFeature WATERMARK, LIST, COORDS, DIR, SPEED, CLOCK, CPS, KEYS, ARMOR, EFFECTS;
+    static Feature FULLBRIGHT;
     static double speed, lastX, lastZ;
 
-    static HudFeature hud(String n, boolean on) {
-        HudFeature f = new HudFeature(n);
+    static HudFeature hud(String n, String cat, boolean on, String desc) {
+        HudFeature f = new HudFeature(n, cat);
         f.enabled = on;
+        f.desc = desc;
         ALL.add(f);
         return f;
     }
 
     static void init() {
-        ALL.add(new Fullbright());
-        ALL.add(new Zoom());
-        ALL.add(new Fov());
-        WATERMARK = hud("Watermark", true);
-        LIST = hud("ArrayList", true);
-        COORDS = hud("Coordinates", false);
-        DIR = hud("Direction", false);
-        SPEED = hud("Speed", false);
-        CLOCK = hud("Clock", false);
-        KEYS = hud("Keystrokes", false);
-        ARMOR = hud("Armor", false);
+        FULLBRIGHT = new Fullbright().d("Полная яркость без факела");
+        ALL.add(FULLBRIGHT);
+        ALL.add(new Zoom().d("Приближение камеры"));
+        ALL.add(new Fov().d("Свой угол обзора"));
+        ALL.add(new NoBob().d("Убирает покачивание камеры при ходьбе"));
+        ALL.add(new NoClouds().d("Отключает облака для FPS"));
+        ALL.add(new MinParticles().d("Минимум частиц для FPS"));
+        ALL.add(new RenderDist().d("Дальность прорисовки в чанках"));
+        WATERMARK = hud("Watermark", "Interface", true, "Плашка с логотипом, FPS и пингом");
+        LIST = hud("ArrayList", "Interface", true, "Список включённых модулей");
+        KEYS = hud("Keystrokes", "Interface", false, "Показ нажатых клавиш WASD");
+        ARMOR = hud("Armor", "Interface", false, "Броня и её прочность");
+        EFFECTS = hud("Effects", "Interface", false, "Список эффектов с таймером");
+        COORDS = hud("Coordinates", "Info", false, "Твои координаты");
+        DIR = hud("Direction", "Info", false, "Куда ты смотришь");
+        SPEED = hud("Speed", "Info", false, "Скорость в блоках в секунду");
+        CLOCK = hud("Clock", "Info", false, "Системное время");
+        CPS = hud("CPS", "Info", false, "Клики в секунду");
     }
 
     static Feature find(String n) {
@@ -302,6 +384,7 @@ final class Config {
     static void save() {
         try {
             JsonObject root = new JsonObject();
+            root.addProperty("_theme", Theme.idx);
             for (Feature f : Modules.ALL) {
                 JsonObject o = new JsonObject();
                 o.addProperty("key", f.key);
@@ -318,6 +401,7 @@ final class Config {
             Path p = file();
             if (!Files.exists(p)) return;
             JsonObject root = JsonParser.parseString(Files.readString(p)).getAsJsonObject();
+            if (root.has("_theme")) Theme.idx = Math.max(0, Math.min(Theme.COLORS.length - 1, root.get("_theme").getAsInt()));
             for (Feature f : Modules.ALL) {
                 if (!root.has(f.name)) continue;
                 JsonObject o = root.getAsJsonObject(f.name);
@@ -333,7 +417,7 @@ final class Config {
 
 final class Hud {
     static final DateTimeFormatter HM = DateTimeFormatter.ofPattern("HH:mm");
-    static final int BG = 0xB0160A2E, ACCENT = 0xFFA678FF, WHITE = 0xFFFFFFFF, GRAY = 0xFF7A8099;
+    static final int BG = 0xB0160A2E, WHITE = 0xFFFFFFFF, GRAY = 0xFF7A8099;
 
     static void render(DrawContext ctx, RenderTickCounter tc) {
         MinecraftClient mc = MinecraftClient.getInstance();
@@ -350,7 +434,7 @@ final class Hud {
                 if (!f.enabled || f.hudOnly) continue;
                 int tw = tr.getWidth(f.name);
                 ctx.fill(w - tw - 10, y, w - 2, y + 11, BG);
-                ctx.fill(w - 2, y, w, y + 11, ACCENT);
+                ctx.fill(w - 2, y, w, y + 11, Theme.argb());
                 ctx.drawTextWithShadow(tr, f.name, w - tw - 6, y + 2, WHITE);
                 y += 11;
             }
@@ -369,6 +453,8 @@ final class Hud {
             lines.add(String.format(Locale.ROOT, "Speed  %.1f b/s", Modules.speed));
         if (Modules.CLOCK.enabled)
             lines.add("Time  " + LocalTime.now().format(HM));
+        if (Modules.CPS.enabled)
+            lines.add("CPS  " + cps(mc));
         int top = h - 4;
         if (!lines.isEmpty()) {
             int mw = 0;
@@ -376,7 +462,7 @@ final class Hud {
             int bh = lines.size() * 11 + 4;
             top = h - 4 - bh;
             ctx.fill(4, top, 4 + mw + 12, top + bh, BG);
-            ctx.fill(4, top, 6, top + bh, ACCENT);
+            ctx.fill(4, top, 6, top + bh, Theme.argb());
             for (int i = 0; i < lines.size(); i++)
                 ctx.drawTextWithShadow(tr, lines.get(i), 10, top + 4 + i * 11, WHITE);
         }
@@ -395,9 +481,43 @@ final class Hud {
             EquipmentSlot[] slots = {EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET};
             for (int i = 0; i < slots.length; i++) {
                 var st = p.getEquippedStack(slots[i]);
-                if (!st.isEmpty()) ctx.drawItem(st, w - 22, h / 2 - 32 + i * 17);
+                if (st.isEmpty()) continue;
+                int ay = h / 2 - 32 + i * 17;
+                ctx.drawItem(st, w - 22, ay);
+                int max = st.getMaxDamage();
+                if (max > 0) {
+                    String pct = ((max - st.getDamage()) * 100 / max) + "%";
+                    ctx.drawTextWithShadow(tr, pct, w - 25 - tr.getWidth(pct), ay + 4, WHITE);
+                }
             }
         }
+
+        // Эффекты слева под плашкой
+        if (Modules.EFFECTS.enabled) {
+            int ey = 26;
+            for (var e : p.getStatusEffects()) {
+                if (e.getEffectType() == StatusEffects.NIGHT_VISION && Modules.FULLBRIGHT.enabled) continue;
+                int sec = e.getDuration() / 20;
+                String t = e.isInfinite() ? "inf" : (sec / 60) + ":" + String.format(Locale.ROOT, "%02d", sec % 60);
+                String line = e.getEffectType().value().getName().getString() + " " + (e.getAmplifier() + 1) + "  " + t;
+                int lw = tr.getWidth(line);
+                ClickGuiScreen.rrect(ctx, 4, ey, 4 + lw + 12, ey + 13, 4, BG);
+                ctx.drawTextWithShadow(tr, line, 10, ey + 3, WHITE);
+                ey += 15;
+            }
+        }
+    }
+
+    static final ArrayDeque<Long> CLICKS = new ArrayDeque<>();
+    static boolean lastDown;
+
+    static int cps(MinecraftClient mc) {
+        long now = System.currentTimeMillis();
+        boolean down = GLFW.glfwGetMouseButton(mc.getWindow().getHandle(), GLFW.GLFW_MOUSE_BUTTON_LEFT) == GLFW.GLFW_PRESS;
+        if (down && !lastDown) CLICKS.add(now);
+        lastDown = down;
+        while (!CLICKS.isEmpty() && now - CLICKS.peekFirst() > 1000) CLICKS.pollFirst();
+        return CLICKS.size();
     }
 
     static void watermark(DrawContext ctx, MinecraftClient mc) {
@@ -407,12 +527,17 @@ final class Hud {
         int ping = entry != null ? entry.getLatency() : 0;
         String a = mc.getCurrentFps() + " FPS", sep = " | ", b = "EXTERNAL", c = ping + " ms";
         int width = tr.getWidth(a) + tr.getWidth(sep) * 2 + tr.getWidth(b) + tr.getWidth(c) + 14;
-        ctx.fill(4, 4, 4 + width, 20, BG);
-        ctx.fill(4, 4, 6, 20, ACCENT);
-        int x = 11;
+        // логотип: скруглённый квадрат с буквой E
+        ClickGuiScreen.rrect(ctx, 4, 4, 20, 20, 4, Theme.argb());
+        ctx.fill(8, 7, 10, 17, WHITE);
+        ctx.fill(8, 7, 16, 9, WHITE);
+        ctx.fill(8, 11, 14, 13, WHITE);
+        ctx.fill(8, 15, 16, 17, WHITE);
+        ClickGuiScreen.rrect(ctx, 23, 4, 23 + width, 20, 4, BG);
+        int x = 30;
         ctx.drawTextWithShadow(tr, a, x, 8, WHITE); x += tr.getWidth(a);
         ctx.drawTextWithShadow(tr, sep, x, 8, GRAY); x += tr.getWidth(sep);
-        ctx.drawTextWithShadow(tr, b, x, 8, ACCENT); x += tr.getWidth(b);
+        ctx.drawTextWithShadow(tr, b, x, 8, Theme.argb()); x += tr.getWidth(b);
         ctx.drawTextWithShadow(tr, sep, x, 8, GRAY); x += tr.getWidth(sep);
         ctx.drawTextWithShadow(tr, c, x, 8, WHITE);
     }
@@ -426,40 +551,30 @@ final class Hud {
 /* ---------------- Клик-гуи ---------------- */
 
 class ClickGuiScreen extends Screen {
-    private static final int PW = 116, HEAD = 24, ROW = 17, SUB = 16;
-    private static final int[] PX = new int[2], PY = new int[2];
-    private static boolean placed;
+    private static final int HEAD = 26, ROW = 17, SUB = 16, GAP = 8;
     private final long t0 = System.currentTimeMillis();
     private Feature listening, sliding;
-    private int slidingPanel, dragPanel = -1;
-    private double dragDx, dragDy;
+    private int slidingPanel;
 
     ClickGuiScreen() { super(Text.literal("External")); }
 
-    @Override protected void init() {
-        if (!placed) {
-            int total = Modules.CATS.length * PW + (Modules.CATS.length - 1) * 10;
-            for (int i = 0; i < Modules.CATS.length; i++) {
-                PX[i] = width / 2 - total / 2 + i * (PW + 10);
-                PY[i] = Math.max(10, height / 2 - 90);
-            }
-            placed = true;
-        }
-    }
-
     @Override public boolean shouldPause() { return false; }
 
-    private float alpha() { return Math.max(0.05f, Math.min(1f, (System.currentTimeMillis() - t0) / 180f)); }
-    private static int argb(float a, int rgb) { return ((int) (Math.max(0f, Math.min(1f, a)) * 255) << 24) | (rgb & 0xFFFFFF); }
+    private int count() { return Modules.CATS.length + 1; }
+    private int pw() { return Math.max(84, Math.min(122, (width - 24 - (count() - 1) * GAP) / count())); }
+    private int px(int i) { return width / 2 - (count() * pw() + (count() - 1) * GAP) / 2 + i * (pw() + GAP); }
+    private int top() { return Math.max(14, height / 2 - 105); }
+    private float alpha() { return Math.max(0.05f, Math.min(1f, (System.currentTimeMillis() - t0) / 200f)); }
+    static int argb(float a, int rgb) { return ((int) (Math.max(0f, Math.min(1f, a)) * 255) << 24) | (rgb & 0xFFFFFF); }
     private static int rowH(Feature f) { return ROW + (f.open ? (f.hasValue ? SUB : 0) + SUB : 0); }
 
-    private void setSlider(Feature f, double mx, int panel) {
-        double t = Math.max(0, Math.min(1, (mx - (PX[panel] + 8)) / (PW - 16)));
-        double v = f.min + Math.round((f.min + t * (f.max - f.min) - f.min) / f.step) * f.step;
-        f.value = Math.max(f.min, Math.min(f.max, v));
+    private int panelH(int p) {
+        int h = HEAD + 6;
+        for (Feature f : Modules.in(Modules.CATS[p])) h += rowH(f);
+        return h;
     }
 
-    private static void rrect(DrawContext c, int x1, int y1, int x2, int y2, int r, int col) {
+    static void rrect(DrawContext c, int x1, int y1, int x2, int y2, int r, int col) {
         c.fill(x1, y1 + r, x2, y2 - r, col);
         for (int i = 0; i < r; i++) {
             int inset = r - (int) Math.round(Math.sqrt((double) r * r - (double) (r - i) * (r - i)));
@@ -480,60 +595,86 @@ class ClickGuiScreen extends Screen {
         for (int[] q : pts) c.fill(x + q[0], y + q[1], x + q[0] + 1, y + q[1] + 2, col);
     }
 
+    private void setSlider(Feature f, double mx, int panel) {
+        double t = Math.max(0, Math.min(1, (mx - (px(panel) + 10)) / (pw() - 20)));
+        double v = f.min + Math.round((t * (f.max - f.min)) / f.step) * f.step;
+        f.value = Math.max(f.min, Math.min(f.max, v));
+    }
+
     @Override
     public void render(DrawContext c, int mx, int my, float delta) {
         super.render(c, mx, my, delta);
         float al = alpha();
-        c.fillGradient(0, 0, width, height, argb(al * 0.55f, 0x24104F), argb(al * 0.80f, 0x05020F));
+        c.fillGradient(0, 0, width, height, argb(al * 0.55f, 0x2A1259), argb(al * 0.85f, 0x05020F));
+        int pw = pw(), top = top(), maxH = 66;
+        Feature hoverF = null;
         for (int p = 0; p < Modules.CATS.length; p++) {
-            int x = PX[p], y = PY[p];
-            List<Feature> fs = Modules.in(Modules.CATS[p]);
-            int h = HEAD + 6;
-            for (Feature f : fs) h += rowH(f);
-            rrect(c, x, y, x + PW, y + h, 7, argb(al * 0.93f, 0x170B30));
-            c.drawTextWithShadow(textRenderer, Modules.CATS[p], x + 10, y + 8, argb(al, 0xFFFFFF));
-            rrect(c, x + PW - 18, y + 8, x + PW - 10, y + 16, 3, argb(al, 0xA678FF));
-            int ry = y + HEAD;
-            for (Feature f : fs) {
+            int x = px(p), h = panelH(p);
+            maxH = Math.max(maxH, h);
+            rrect(c, x, top, x + pw, top + h, 8, argb(al * 0.92f, 0x150A2D));
+            c.drawTextWithShadow(textRenderer, Text.literal(Modules.CATS[p]).formatted(Formatting.BOLD),
+                    x + 10, top + 9, argb(al, 0xFFFFFF));
+            rrect(c, x + pw - 19, top + 9, x + pw - 10, top + 18, 3, argb(al * 0.9f, Theme.rgb()));
+            int ry = top + HEAD;
+            for (Feature f : Modules.in(Modules.CATS[p])) {
                 f.anim += ((f.enabled ? 1f : 0f) - f.anim) * 0.3f;
-                boolean hov = mx >= x && mx < x + PW && my >= ry && my < ry + ROW;
-                if (hov) rrect(c, x + 4, ry, x + PW - 4, ry + ROW, 4, argb(al * 0.10f, 0xFFFFFF));
-                int col = lerp(0xFFFFFF, 0xB57CFF, f.anim);
-                c.drawTextWithShadow(textRenderer, f.name, x + 10, ry + 5, argb(al, col));
-                if (f.enabled) check(c, x + PW - 17, ry + 5, argb(al, 0xB57CFF));
-                else if (f.hasValue) c.drawTextWithShadow(textRenderer, f.open ? "-" : "+", x + PW - 15, ry + 5, argb(al, 0x6B5C8F));
+                boolean hov = mx >= x && mx < x + pw && my >= ry && my < ry + ROW;
+                if (hov) { rrect(c, x + 4, ry, x + pw - 4, ry + ROW, 4, argb(al * 0.10f, 0xFFFFFF)); hoverF = f; }
+                c.drawTextWithShadow(textRenderer, f.name, x + 10, ry + 5, argb(al, lerp(0xFFFFFF, Theme.light(), f.anim)));
+                if (f.enabled) check(c, x + pw - 17, ry + 5, argb(al, Theme.light()));
+                else if (f.hasValue) c.drawTextWithShadow(textRenderer, f.open ? "-" : "+", x + pw - 15, ry + 5, argb(al, 0x6B5C8F));
                 int y2 = ry + ROW;
                 if (f.open) {
-                    rrect(c, x + 4, y2, x + PW - 4, ry + rowH(f), 4, argb(al * 0.6f, 0x0A0418));
+                    rrect(c, x + 4, y2, x + pw - 4, ry + rowH(f), 4, argb(al * 0.6f, 0x0A0418));
                     if (f.hasValue) {
                         double t = (f.value - f.min) / (f.max - f.min);
-                        int tx1 = x + 10, tx2 = x + PW - 10, kx = tx1 + (int) ((tx2 - tx1) * t);
+                        int tx1 = x + 10, tx2 = x + pw - 10, kx = tx1 + (int) ((tx2 - tx1) * t);
                         c.drawTextWithShadow(textRenderer, String.valueOf((int) f.value), x + 10, y2 + 1, argb(al, 0xFFFFFF));
                         c.fill(tx1, y2 + 11, tx2, y2 + 13, argb(al, 0x2E2150));
-                        c.fill(tx1, y2 + 11, kx, y2 + 13, argb(al, 0xA678FF));
+                        c.fill(tx1, y2 + 11, kx, y2 + 13, argb(al, Theme.rgb()));
                         rrect(c, kx - 2, y2 + 9, kx + 2, y2 + 15, 2, argb(al, 0xFFFFFF));
                         y2 += SUB;
                     }
                     String b = listening == f ? "Bind: ..." : "Bind: " + Commands.keyName(f.key);
-                    c.drawTextWithShadow(textRenderer, b, x + 10, y2 + 4, argb(al, 0xA678FF));
+                    c.drawTextWithShadow(textRenderer, b, x + 10, y2 + 4, argb(al, Theme.rgb()));
                 }
                 ry += rowH(f);
             }
         }
-        c.drawTextWithShadow(textRenderer, "LMB toggle | RMB settings | drag header to move",
-                width / 2 - 120, height - 14, argb(al, 0x8A78B8));
+        // панель тем
+        int tp = Modules.CATS.length, tx = px(tp);
+        rrect(c, tx, top, tx + pw, top + 66, 8, argb(al * 0.92f, 0x150A2D));
+        c.drawTextWithShadow(textRenderer, Text.literal("Themes").formatted(Formatting.BOLD), tx + 10, top + 9, argb(al, 0xFFFFFF));
+        c.drawTextWithShadow(textRenderer, "Accent", tx + 10, top + 28, argb(al, 0x9A8CC0));
+        int step = (pw - 20) / Theme.COLORS.length, size = Math.min(13, step - 3);
+        for (int i = 0; i < Theme.COLORS.length; i++) {
+            int cx = tx + 10 + i * step;
+            if (i == Theme.idx) rrect(c, cx - 2, top + 41, cx + size + 2, top + 43 + size + 2, 6, argb(al * 0.6f, 0xFFFFFF));
+            rrect(c, cx, top + 43, cx + size, top + 43 + size, 5, argb(al, Theme.COLORS[i]));
+        }
+        if (hoverF != null && hoverF.desc != null)
+            c.drawCenteredTextWithShadow(textRenderer, hoverF.desc, width / 2, top + maxH + 12, argb(al, 0xD8CCFF));
+        c.drawCenteredTextWithShadow(textRenderer, "ЛКМ вкл/выкл  |  ПКМ настройки и бинд", width / 2, height - 14, argb(al, 0x8A78B8));
     }
 
     @Override
     public boolean mouseClicked(double mx, double my, int btn) {
-        for (int p = 0; p < Modules.CATS.length; p++) {
-            int x = PX[p], y = PY[p];
-            if (mx < x || mx > x + PW) continue;
-            if (my >= y && my < y + HEAD) {
-                if (btn == 0) { dragPanel = p; dragDx = mx - x; dragDy = my - y; }
+        int pw = pw(), top = top();
+        // темы
+        int tp = Modules.CATS.length, tx = px(tp);
+        if (btn == 0 && mx >= tx + 10 && mx < tx + pw && my >= top + 41 && my <= top + 62) {
+            int step = (pw - 20) / Theme.COLORS.length, size = Math.min(13, step - 3);
+            int i = (int) ((mx - (tx + 10)) / step);
+            if (i >= 0 && i < Theme.COLORS.length && (mx - (tx + 10)) % step <= size + 2) {
+                Theme.idx = i;
+                Config.save();
                 return true;
             }
-            int ry = y + HEAD;
+        }
+        for (int p = 0; p < Modules.CATS.length; p++) {
+            int x = px(p);
+            if (mx < x || mx > x + pw) continue;
+            int ry = top + HEAD;
             for (Feature f : Modules.in(Modules.CATS[p])) {
                 if (my >= ry && my < ry + ROW) {
                     if (btn == 0) f.toggle();
@@ -562,11 +703,6 @@ class ClickGuiScreen extends Screen {
 
     @Override
     public boolean mouseDragged(double mx, double my, int btn, double dx, double dy) {
-        if (dragPanel >= 0) {
-            PX[dragPanel] = (int) (mx - dragDx);
-            PY[dragPanel] = (int) (my - dragDy);
-            return true;
-        }
         if (sliding != null) { setSlider(sliding, mx, slidingPanel); return true; }
         return super.mouseDragged(mx, my, btn, dx, dy);
     }
@@ -574,7 +710,6 @@ class ClickGuiScreen extends Screen {
     @Override
     public boolean mouseReleased(double mx, double my, int btn) {
         if (sliding != null) Config.save();
-        dragPanel = -1;
         sliding = null;
         return super.mouseReleased(mx, my, btn);
     }
