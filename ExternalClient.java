@@ -333,7 +333,7 @@ final class Config {
 
 final class Hud {
     static final DateTimeFormatter HM = DateTimeFormatter.ofPattern("HH:mm");
-    static final int BG = 0xB0111528, ACCENT = 0xFF8A5CFF, WHITE = 0xFFFFFFFF, GRAY = 0xFF7A8099;
+    static final int BG = 0xB0160A2E, ACCENT = 0xFFA678FF, WHITE = 0xFFFFFFFF, GRAY = 0xFF7A8099;
 
     static void render(DrawContext ctx, RenderTickCounter tc) {
         MinecraftClient mc = MinecraftClient.getInstance();
@@ -426,7 +426,7 @@ final class Hud {
 /* ---------------- Клик-гуи ---------------- */
 
 class ClickGuiScreen extends Screen {
-    private static final int PW = 112, HEAD = 20, ROW = 18, SUB = 16;
+    private static final int PW = 116, HEAD = 24, ROW = 17, SUB = 16;
     private static final int[] PX = new int[2], PY = new int[2];
     private static boolean placed;
     private final long t0 = System.currentTimeMillis();
@@ -459,118 +459,47 @@ class ClickGuiScreen extends Screen {
         f.value = Math.max(f.min, Math.min(f.max, v));
     }
 
+    private static void rrect(DrawContext c, int x1, int y1, int x2, int y2, int r, int col) {
+        c.fill(x1, y1 + r, x2, y2 - r, col);
+        for (int i = 0; i < r; i++) {
+            int inset = r - (int) Math.round(Math.sqrt((double) r * r - (double) (r - i) * (r - i)));
+            c.fill(x1 + inset, y1 + i, x2 - inset, y1 + i + 1, col);
+            c.fill(x1 + inset, y2 - i - 1, x2 - inset, y2 - i, col);
+        }
+    }
+
+    private static int lerp(int a, int b, float t) {
+        int r = (int) (((a >> 16) & 255) * (1 - t) + ((b >> 16) & 255) * t);
+        int g = (int) (((a >> 8) & 255) * (1 - t) + ((b >> 8) & 255) * t);
+        int bl = (int) ((a & 255) * (1 - t) + (b & 255) * t);
+        return (r << 16) | (g << 8) | bl;
+    }
+
+    private static void check(DrawContext c, int x, int y, int col) {
+        int[][] pts = {{0, 3}, {1, 4}, {2, 3}, {3, 2}, {4, 1}, {5, 0}};
+        for (int[] q : pts) c.fill(x + q[0], y + q[1], x + q[0] + 1, y + q[1] + 2, col);
+    }
+
     @Override
     public void render(DrawContext c, int mx, int my, float delta) {
         super.render(c, mx, my, delta);
         float al = alpha();
-        c.fill(0, 0, width, height, argb(al * 0.40f, 0x000000));
+        c.fillGradient(0, 0, width, height, argb(al * 0.55f, 0x24104F), argb(al * 0.80f, 0x05020F));
         for (int p = 0; p < Modules.CATS.length; p++) {
             int x = PX[p], y = PY[p];
             List<Feature> fs = Modules.in(Modules.CATS[p]);
-            int h = HEAD;
+            int h = HEAD + 6;
             for (Feature f : fs) h += rowH(f);
-            c.fill(x - 1, y - 1, x + PW + 1, y + h + 1, argb(al * 0.8f, 0x8A5CFF));
-            c.fill(x, y, x + PW, y + h, argb(al * 0.95f, 0x111528));
-            c.fillGradient(x, y, x + PW, y + HEAD, argb(al, 0x7C54F0), argb(al, 0x3B2A8F));
-            c.drawTextWithShadow(textRenderer, Modules.CATS[p].toUpperCase(), x + 8, y + 6, argb(al, 0xFFFFFF));
+            rrect(c, x, y, x + PW, y + h, 7, argb(al * 0.93f, 0x170B30));
+            c.drawTextWithShadow(textRenderer, Modules.CATS[p], x + 10, y + 8, argb(al, 0xFFFFFF));
+            rrect(c, x + PW - 18, y + 8, x + PW - 10, y + 16, 3, argb(al, 0xA678FF));
             int ry = y + HEAD;
             for (Feature f : fs) {
                 f.anim += ((f.enabled ? 1f : 0f) - f.anim) * 0.3f;
                 boolean hov = mx >= x && mx < x + PW && my >= ry && my < ry + ROW;
-                c.fill(x, ry, x + PW, ry + ROW, argb(al * (0.10f + 0.55f * f.anim), f.anim > 0.02f ? 0x8A5CFF : 0x000000));
-                if (hov) c.fill(x, ry, x + PW, ry + ROW, argb(al * 0.12f, 0xFFFFFF));
-                if (f.anim > 0.02f) c.fill(x, ry, x + 2, ry + ROW, argb(al * f.anim, 0x4FC3FF));
-                c.drawTextWithShadow(textRenderer, f.name, x + 8, ry + 5, argb(al, f.enabled ? 0xFFFFFF : 0x9AA0B5));
-                String mark = f.open ? "-" : "+";
-                c.drawTextWithShadow(textRenderer, mark, x + PW - 10, ry + 5, argb(al, 0x7A8099));
-                int y2 = ry + ROW;
-                if (f.open) {
-                    c.fill(x, y2, x + PW, ry + rowH(f), argb(al * 0.5f, 0x000000));
-                    if (f.hasValue) {
-                        double t = (f.value - f.min) / (f.max - f.min);
-                        c.drawTextWithShadow(textRenderer, String.valueOf((int) f.value), x + 8, y2 + 1, argb(al, 0xFFFFFF));
-                        c.fill(x + 8, y2 + 11, x + PW - 8, y2 + 13, argb(al, 0x2A2F4A));
-                        c.fill(x + 8, y2 + 11, x + 8 + (int) ((PW - 16) * t), y2 + 13, argb(al, 0x8A5CFF));
-                        c.fill(x + 6 + (int) ((PW - 16) * t), y2 + 9, x + 10 + (int) ((PW - 16) * t), y2 + 15, argb(al, 0xFFFFFF));
-                        y2 += SUB;
-                    }
-                    String b = listening == f ? "Bind: ..." : "Bind: " + Commands.keyName(f.key);
-                    c.drawTextWithShadow(textRenderer, b, x + 8, y2 + 4, argb(al, 0x4FC3FF));
-                }
-                ry += rowH(f);
-            }
-        }
-        c.drawTextWithShadow(textRenderer, "LMB toggle | RMB settings | drag header to move",
-                width / 2 - 120, height - 14, argb(al, 0x7A8099));
-    }
-
-    @Override
-    public boolean mouseClicked(double mx, double my, int btn) {
-        for (int p = 0; p < Modules.CATS.length; p++) {
-            int x = PX[p], y = PY[p];
-            if (mx < x || mx > x + PW) continue;
-            if (my >= y && my < y + HEAD) {
-                if (btn == 0) { dragPanel = p; dragDx = mx - x; dragDy = my - y; }
-                return true;
-            }
-            int ry = y + HEAD;
-            for (Feature f : Modules.in(Modules.CATS[p])) {
-                if (my >= ry && my < ry + ROW) {
-                    if (btn == 0) f.toggle();
-                    else if (btn == 1) f.open = !f.open;
-                    return true;
-                }
-                int y2 = ry + ROW;
-                if (f.open) {
-                    if (f.hasValue) {
-                        if (my >= y2 && my < y2 + SUB) {
-                            if (btn == 0) { sliding = f; slidingPanel = p; setSlider(f, mx, p); }
-                            return true;
-                        }
-                        y2 += SUB;
-                    }
-                    if (my >= y2 && my < y2 + SUB) {
-                        if (btn == 0) listening = f;
-                        return true;
-                    }
-                }
-                ry += rowH(f);
-            }
-        }
-        return super.mouseClicked(mx, my, btn);
-    }
-
-    @Override
-    public boolean mouseDragged(double mx, double my, int btn, double dx, double dy) {
-        if (dragPanel >= 0) {
-            PX[dragPanel] = (int) (mx - dragDx);
-            PY[dragPanel] = (int) (my - dragDy);
-            return true;
-        }
-        if (sliding != null) { setSlider(sliding, mx, slidingPanel); return true; }
-        return super.mouseDragged(mx, my, btn, dx, dy);
-    }
-
-    @Override
-    public boolean mouseReleased(double mx, double my, int btn) {
-        if (sliding != null) Config.save();
-        dragPanel = -1;
-        sliding = null;
-        return super.mouseReleased(mx, my, btn);
-    }
-
-    @Override
-    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-        if (listening != null) {
-            listening.key = keyCode == GLFW.GLFW_KEY_ESCAPE ? -1 : keyCode;
-            listening = null;
-            Config.save();
-            return true;
-        }
-        if (ExternalClient.guiKey.matchesKey(keyCode, scanCode)) {
-            close();
-            return true;
-        }
-        return super.keyPressed(keyCode, scanCode, modifiers);
-    }
-}
+                if (hov) rrect(c, x + 4, ry, x + PW - 4, ry + ROW, 4, argb(al * 0.10f, 0xFFFFFF));
+                int col = lerp(0xFFFFFF, 0xB57CFF, f.anim);
+                c.drawTextWithShadow(textRenderer, f.name, x + 10, ry + 5, argb(al, col));
+                if (f.enabled) check(c, x + PW - 17, ry + 5, argb(al, 0xB57CFF));
+                else if (f.hasValue) c.drawTextWithShadow(textRenderer, f.open ? "-" : "+", x + PW - 15, ry + 5, argb(al, 0x6B5C8F));
+                    
