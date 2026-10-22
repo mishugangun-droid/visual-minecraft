@@ -502,4 +502,3 @@ class ClickGuiScreen extends Screen {
                 c.drawTextWithShadow(textRenderer, f.name, x + 10, ry + 5, argb(al, col));
                 if (f.enabled) check(c, x + PW - 17, ry + 5, argb(al, 0xB57CFF));
                 else if (f.hasValue) c.drawTextWithShadow(textRenderer, f.open ? "-" : "+", x + PW - 15, ry + 5, argb(al, 0x6B5C8F));
-                
