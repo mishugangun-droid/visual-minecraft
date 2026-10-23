@@ -18,6 +18,8 @@ import net.minecraft.client.option.SimpleOption;
 import net.minecraft.client.render.RenderTickCounter;
 import net.minecraft.client.util.InputUtil;
 import net.minecraft.entity.EquipmentSlot;
+import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
 import net.minecraft.entity.effect.StatusEffectInstance;
 import net.minecraft.entity.effect.StatusEffects;
 import net.minecraft.text.Text;
@@ -193,6 +195,51 @@ class Fov extends FovBase {
     Fov() { super("FOV"); range(100, 70, 110, 5); }
 }
 
+class FpsCap extends Feature {
+    Integer old;
+    FpsCap() { super("FpsCap", "Performance"); range(144, 30, 260, 10); }
+    @Override void onEnable(MinecraftClient mc) { old = mc.options.getMaxFps().getValue(); apply(mc); }
+    @Override void onTick(MinecraftClient mc) { apply(mc); }
+    void apply(MinecraftClient mc) {
+        int v = (int) value;
+        if (mc.options.getMaxFps().getValue() != v) mc.options.getMaxFps().setValue(v);
+    }
+    @Override void onDisable(MinecraftClient mc) {
+        if (old != null) mc.options.getMaxFps().setValue(old);
+        old = null;
+    }
+}
+
+class EntityDist extends Feature {
+    Double old;
+    EntityDist() { super("EntityDist", "Performance"); range(1.0, 0.5, 5.0, 0.5); }
+    @Override void onEnable(MinecraftClient mc) { old = mc.options.getEntityDistanceScaling().getValue(); apply(mc); }
+    @Override void onTick(MinecraftClient mc) { apply(mc); }
+    void apply(MinecraftClient mc) {
+        double v = value;
+        if (Math.abs(mc.options.getEntityDistanceScaling().getValue() - v) > 0.01) mc.options.getEntityDistanceScaling().setValue(v);
+    }
+    @Override void onDisable(MinecraftClient mc) {
+        if (old != null) mc.options.getEntityDistanceScaling().setValue(old);
+        old = null;
+    }
+}
+
+class DeathCoords extends Feature {
+    boolean dead;
+    DeathCoords() { super("DeathCoords", "Utility"); }
+    @Override void onTick(MinecraftClient mc) {
+        if (mc.player == null) return;
+        if (!mc.player.isAlive()) {
+            if (!dead) {
+                dead = true;
+                Chat.say("\u00a7dDeath at \u00a7f" + (int) Math.floor(mc.player.getX()) + " "
+                        + (int) Math.floor(mc.player.getY()) + " " + (int) Math.floor(mc.player.getZ()));
+            }
+        } else dead = false;
+    }
+}
+
 final class Theme {
     static final int[] COLORS = {0xA678FF, 0x4FC3FF, 0xFF6EB4, 0x5CFFA0, 0xFFA05C};
     static int idx = 0;
@@ -206,9 +253,10 @@ final class Theme {
 }
 
 final class Modules {
-    static final String[] CATS = {"Visuals", "Performance", "Interface", "Info"};
+    static final String[] CATS = {"Visuals", "Performance", "Panels", "Widgets", "Utility"};
     static final List<Feature> ALL = new ArrayList<>();
-    static HudFeature WATERMARK, LIST, COORDS, DIR, SPEED, CLOCK, CPS, KEYS, ARMOR, EFFECTS;
+    static HudFeature WATERMARK, TIME, INFO, STATS, EFFECTS, BINDS, ARMOR;
+    static HudFeature KEYS, CPS, DIR, PLAYERS, HELD, ITEMS, NETHER, LIGHT, DAY, MEMORY, LIST;
     static Feature FULLBRIGHT;
     static double speed, lastX, lastZ;
 
@@ -229,16 +277,27 @@ final class Modules {
         ALL.add(new NoClouds().d("Отключает облака для FPS"));
         ALL.add(new MinParticles().d("Минимум частиц для FPS"));
         ALL.add(new RenderDist().d("Дальность прорисовки в чанках"));
-        WATERMARK = hud("Watermark", "Interface", true, "Плашка с логотипом, FPS и пингом");
-        LIST = hud("ArrayList", "Interface", true, "Список включённых модулей");
-        KEYS = hud("Keystrokes", "Interface", false, "Показ нажатых клавиш WASD");
-        ARMOR = hud("Armor", "Interface", false, "Броня и её прочность");
-        EFFECTS = hud("Effects", "Interface", false, "Список эффектов с таймером");
-        COORDS = hud("Coordinates", "Info", false, "Твои координаты");
-        DIR = hud("Direction", "Info", false, "Куда ты смотришь");
-        SPEED = hud("Speed", "Info", false, "Скорость в блоках в секунду");
-        CLOCK = hud("Clock", "Info", false, "Системное время");
-        CPS = hud("CPS", "Info", false, "Клики в секунду");
+        ALL.add(new FpsCap().d("Лимит FPS (260 = без лимита)"));
+        ALL.add(new EntityDist().d("Дальность прорисовки мобов"));
+        WATERMARK = hud("Watermark", "Panels", true, "Название клиента вверху по центру");
+        TIME = hud("Time", "Panels", true, "Часы рядом с названием");
+        INFO = hud("Info", "Panels", true, "Координаты и режим игры");
+        STATS = hud("Stats", "Panels", true, "FPS, скорость и пинг");
+        EFFECTS = hud("Effects", "Panels", true, "Эффекты с таймером слева");
+        BINDS = hud("Binds", "Panels", false, "Список твоих биндов справа");
+        ARMOR = hud("Armor", "Panels", true, "Броня и прочность возле хотбара");
+        KEYS = hud("Keystrokes", "Widgets", false, "Показ нажатых клавиш WASD");
+        CPS = hud("CPS", "Widgets", false, "Клики в секунду");
+        DIR = hud("Direction", "Widgets", false, "Куда ты смотришь");
+        PLAYERS = hud("Players", "Widgets", false, "Игроков на сервере, крупно");
+        HELD = hud("HeldItem", "Widgets", false, "Предмет в руке и прочность");
+        ITEMS = hud("Items", "Widgets", false, "Тотемы, яблоки, жемчуг, кристаллы");
+        NETHER = hud("Nether", "Widgets", false, "Координаты для портала в Незер");
+        LIGHT = hud("Light", "Widgets", false, "Уровень света под ногами");
+        DAY = hud("Day", "Widgets", false, "Номер игрового дня");
+        MEMORY = hud("Memory", "Widgets", false, "Использование оперативной памяти");
+        LIST = hud("ArrayList", "Utility", true, "Список включённых модулей справа сверху");
+        ALL.add(new DeathCoords().d("Пишет в чат координаты смерти"));
     }
 
     static Feature find(String n) {
@@ -421,103 +480,40 @@ final class Config {
     }
 }
 
-/* ---------------- HUD ---------------- */
+/* ---------------- HUD (стекло, как в iOS) ---------------- */
 
 final class Hud {
     static final DateTimeFormatter HM = DateTimeFormatter.ofPattern("HH:mm");
-    static final int BG = 0xB0160A2E, WHITE = 0xFFFFFFFF, GRAY = 0xFF7A8099;
-
-    static void render(DrawContext ctx, RenderTickCounter tc) {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.options.hudHidden || mc.player == null) return;
-        var tr = mc.textRenderer;
-        int w = ctx.getScaledWindowWidth(), h = ctx.getScaledWindowHeight();
-
-        if (Modules.WATERMARK.enabled) watermark(ctx, mc);
-
-        // ArrayList справа сверху
-        if (Modules.LIST.enabled) {
-            int y = 4;
-            for (Feature f : Modules.ALL) {
-                if (!f.enabled || f.hudOnly) continue;
-                int tw = tr.getWidth(f.name);
-                ctx.fill(w - tw - 10, y, w - 2, y + 11, BG);
-                ctx.fill(w - 2, y, w, y + 11, Theme.argb());
-                ctx.drawTextWithShadow(tr, f.name, w - tw - 6, y + 2, WHITE);
-                y += 11;
-            }
-        }
-
-        // Информационный блок слева снизу
-        List<String> lines = new ArrayList<>();
-        var p = mc.player;
-        if (Modules.COORDS.enabled)
-            lines.add(String.format(Locale.ROOT, "XYZ  %.1f  %.1f  %.1f", p.getX(), p.getY(), p.getZ()));
-        if (Modules.DIR.enabled) {
-            String d = p.getHorizontalFacing().asString();
-            lines.add("Facing  " + Character.toUpperCase(d.charAt(0)) + d.substring(1));
-        }
-        if (Modules.SPEED.enabled)
-            lines.add(String.format(Locale.ROOT, "Speed  %.1f b/s", Modules.speed));
-        if (Modules.CLOCK.enabled)
-            lines.add("Time  " + LocalTime.now().format(HM));
-        if (Modules.CPS.enabled)
-            lines.add("CPS  " + cps(mc));
-        int top = h - 4;
-        if (!lines.isEmpty()) {
-            int mw = 0;
-            for (String s : lines) mw = Math.max(mw, tr.getWidth(s));
-            int bh = lines.size() * 11 + 4;
-            top = h - 4 - bh;
-            ctx.fill(4, top, 4 + mw + 12, top + bh, BG);
-            ctx.fill(4, top, 6, top + bh, Theme.argb());
-            for (int i = 0; i < lines.size(); i++)
-                ctx.drawTextWithShadow(tr, lines.get(i), 10, top + 4 + i * 11, WHITE);
-        }
-
-        // Keystrokes над информационным блоком
-        if (Modules.KEYS.enabled) {
-            int ky = top - 6 - 36;
-            key(ctx, tr, 23, ky, "W", mc.options.forwardKey.isPressed());
-            key(ctx, tr, 4, ky + 19, "A", mc.options.leftKey.isPressed());
-            key(ctx, tr, 23, ky + 19, "S", mc.options.backKey.isPressed());
-            key(ctx, tr, 42, ky + 19, "D", mc.options.rightKey.isPressed());
-        }
-
-        // Броня справа по центру
-        if (Modules.ARMOR.enabled) {
-            EquipmentSlot[] slots = {EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET};
-            for (int i = 0; i < slots.length; i++) {
-                var st = p.getEquippedStack(slots[i]);
-                if (st.isEmpty()) continue;
-                int ay = h / 2 - 32 + i * 17;
-                ctx.drawItem(st, w - 22, ay);
-                int max = st.getMaxDamage();
-                if (max > 0) {
-                    String pct = ((max - st.getDamage()) * 100 / max) + "%";
-                    ctx.drawTextWithShadow(tr, pct, w - 25 - tr.getWidth(pct), ay + 4, WHITE);
-                }
-            }
-        }
-
-        // Эффекты слева под плашкой
-        if (Modules.EFFECTS.enabled) {
-            int ey = 26;
-            for (var e : p.getStatusEffects()) {
-                if (e.getEffectType() == StatusEffects.NIGHT_VISION && Modules.FULLBRIGHT.enabled) continue;
-                int sec = e.getDuration() / 20;
-                String t = e.isInfinite() ? "inf" : (sec / 60) + ":" + String.format(Locale.ROOT, "%02d", sec % 60);
-                String line = e.getEffectType().value().getName().getString() + " " + (e.getAmplifier() + 1) + "  " + t;
-                int lw = tr.getWidth(line);
-                ClickGuiScreen.rrect(ctx, 4, ey, 4 + lw + 12, ey + 13, 4, BG);
-                ctx.drawTextWithShadow(tr, line, 10, ey + 3, WHITE);
-                ey += 15;
-            }
-        }
-    }
-
+    static final int WHITE = 0xFFFFFFFF, DIM = 0xFFB4B4C8;
+    static final String DOT = " \u00b7 ";
     static final ArrayDeque<Long> CLICKS = new ArrayDeque<>();
     static boolean lastDown;
+
+    static int fl(double d) { return (int) Math.floor(d); }
+
+    static void glass(DrawContext c, int x, int y, int w, int h) {
+        int r = Math.min(6, h / 2);
+        ClickGuiScreen.rrect(c, x, y, x + w, y + h, r, 0x50101018);
+        ClickGuiScreen.rrect(c, x, y, x + w, y + h, r, 0x16FFFFFF);
+        c.fill(x + r, y, x + w - r, y + 1, 0x55FFFFFF);
+        c.fill(x + r, y + h - 1, x + w - r, y + h, 0x20FFFFFF);
+    }
+
+    /** Стеклянная плашка с цветной точкой и текстом; части через « · » */
+    static int pill(DrawContext c, net.minecraft.client.font.TextRenderer tr, int x, int y, String text) {
+        String[] parts = text.split(" \u00b7 ");
+        int w = 20 + (parts.length - 1) * tr.getWidth(DOT);
+        for (String s : parts) w += tr.getWidth(s);
+        glass(c, x, y, w, 16);
+        ClickGuiScreen.rrect(c, x + 5, y + 5, x + 11, y + 11, 3, Theme.argb());
+        int cx = x + 15;
+        for (int i = 0; i < parts.length; i++) {
+            c.drawTextWithShadow(tr, parts[i], cx, y + 4, WHITE);
+            cx += tr.getWidth(parts[i]);
+            if (i < parts.length - 1) { c.drawTextWithShadow(tr, DOT, cx, y + 4, DIM); cx += tr.getWidth(DOT); }
+        }
+        return w;
+    }
 
     static int cps(MinecraftClient mc) {
         long now = System.currentTimeMillis();
@@ -528,31 +524,199 @@ final class Hud {
         return CLICKS.size();
     }
 
-    static void watermark(DrawContext ctx, MinecraftClient mc) {
-        var tr = mc.textRenderer;
-        var nh = mc.getNetworkHandler();
-        var entry = (nh != null && mc.player != null) ? nh.getPlayerListEntry(mc.player.getUuid()) : null;
-        int ping = entry != null ? entry.getLatency() : 0;
-        String a = mc.getCurrentFps() + " FPS", sep = " | ", b = "EXTERNAL", c = ping + " ms";
-        int width = tr.getWidth(a) + tr.getWidth(sep) * 2 + tr.getWidth(b) + tr.getWidth(c) + 14;
-        // логотип: скруглённый квадрат с буквой E
-        ClickGuiScreen.rrect(ctx, 4, 4, 20, 20, 4, Theme.argb());
-        ctx.fill(8, 7, 10, 17, WHITE);
-        ctx.fill(8, 7, 16, 9, WHITE);
-        ctx.fill(8, 11, 14, 13, WHITE);
-        ctx.fill(8, 15, 16, 17, WHITE);
-        ClickGuiScreen.rrect(ctx, 23, 4, 23 + width, 20, 4, BG);
-        int x = 30;
-        ctx.drawTextWithShadow(tr, a, x, 8, WHITE); x += tr.getWidth(a);
-        ctx.drawTextWithShadow(tr, sep, x, 8, GRAY); x += tr.getWidth(sep);
-        ctx.drawTextWithShadow(tr, b, x, 8, Theme.argb()); x += tr.getWidth(b);
-        ctx.drawTextWithShadow(tr, sep, x, 8, GRAY); x += tr.getWidth(sep);
-        ctx.drawTextWithShadow(tr, c, x, 8, WHITE);
+    static void logo(DrawContext c, int x, int y) {
+        ClickGuiScreen.rrect(c, x, y, x + 12, y + 12, 3, Theme.argb());
+        c.fill(x + 3, y + 3, x + 4, y + 9, WHITE);
+        c.fill(x + 3, y + 3, x + 9, y + 4, WHITE);
+        c.fill(x + 3, y + 5, x + 7, y + 6, WHITE);
+        c.fill(x + 3, y + 8, x + 9, y + 9, WHITE);
     }
 
     static void key(DrawContext ctx, net.minecraft.client.font.TextRenderer tr, int x, int y, String s, boolean down) {
-        ctx.fill(x, y, x + 17, y + 17, down ? 0xCC8A5CFF : BG);
+        glass(ctx, x, y, 17, 17);
+        if (down) ClickGuiScreen.rrect(ctx, x, y, x + 17, y + 17, 6, (Theme.argb() & 0x00FFFFFF) | 0x99000000);
         ctx.drawTextWithShadow(tr, s, x + (17 - tr.getWidth(s)) / 2, y + 5, WHITE);
+    }
+
+    static void render(DrawContext ctx, RenderTickCounter tc) {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc.options.hudHidden || mc.player == null) return;
+        var tr = mc.textRenderer;
+        var p = mc.player;
+        int w = ctx.getScaledWindowWidth(), h = ctx.getScaledWindowHeight();
+        var nh = mc.getNetworkHandler();
+        var entry = nh != null ? nh.getPlayerListEntry(p.getUuid()) : null;
+        int ping = entry != null ? entry.getLatency() : 0;
+
+        // --- слева сверху: стопка плашек
+        int y = 6;
+        if (Modules.INFO.enabled) {
+            pill(ctx, tr, 6, y, fl(p.getX()) + " " + fl(p.getY()) + " " + fl(p.getZ()) + DOT + (mc.isInSingleplayer() ? "Single" : "Online"));
+            y += 19;
+        }
+        if (Modules.STATS.enabled) {
+            pill(ctx, tr, 6, y, mc.getCurrentFps() + " FPS" + DOT + String.format(Locale.ROOT, "%.2f BPS", Modules.speed) + DOT + ping + " ms");
+            y += 19;
+        }
+        if (Modules.DIR.enabled) {
+            String d = p.getHorizontalFacing().asString();
+            pill(ctx, tr, 6, y, "Facing " + Character.toUpperCase(d.charAt(0)) + d.substring(1));
+            y += 19;
+        }
+        if (Modules.NETHER.enabled) {
+            pill(ctx, tr, 6, y, "Nether " + fl(p.getX() / 8) + " " + fl(p.getY()) + " " + fl(p.getZ() / 8));
+            y += 19;
+        }
+        if (Modules.LIGHT.enabled && mc.world != null) {
+            pill(ctx, tr, 6, y, "Light " + mc.world.getLightLevel(p.getBlockPos()));
+            y += 19;
+        }
+        if (Modules.DAY.enabled && mc.world != null) {
+            pill(ctx, tr, 6, y, "Day " + (mc.world.getTimeOfDay() / 24000L));
+            y += 19;
+        }
+        if (Modules.MEMORY.enabled) {
+            Runtime rt = Runtime.getRuntime();
+            long used = (rt.totalMemory() - rt.freeMemory()) >> 20;
+            pill(ctx, tr, 6, y, "RAM " + used + "/" + (rt.maxMemory() >> 20) + " MB");
+        }
+
+        // --- сверху по центру: название и время
+        int cx = w / 2;
+        String time = LocalTime.now().format(HM);
+        int ww = tr.getWidth("EXTERNAL") + 30, tw = tr.getWidth(time) + 14;
+        int total = (Modules.WATERMARK.enabled ? ww : 0) + (Modules.TIME.enabled ? tw : 0)
+                + (Modules.WATERMARK.enabled && Modules.TIME.enabled ? 4 : 0);
+        int x0 = cx - total / 2;
+        if (Modules.WATERMARK.enabled) {
+            glass(ctx, x0, 6, ww, 16);
+            logo(ctx, x0 + 4, 8);
+            ctx.drawTextWithShadow(tr, "EXTERNAL", x0 + 21, 10, WHITE);
+            x0 += ww + 4;
+        }
+        if (Modules.TIME.enabled) {
+            glass(ctx, x0, 6, tw, 16);
+            ctx.drawTextWithShadow(tr, time, x0 + 7, 10, WHITE);
+        }
+        if (Modules.PLAYERS.enabled && nh != null) {
+            ctx.getMatrices().push();
+            ctx.getMatrices().translate(cx, 28, 0);
+            ctx.getMatrices().scale(2f, 2f, 1f);
+            ctx.drawCenteredTextWithShadow(tr, nh.getPlayerList().size() + " online", 0, 0, WHITE);
+            ctx.getMatrices().pop();
+        }
+
+        // --- справа сверху: список модулей
+        if (Modules.LIST.enabled) {
+            int ry = 6;
+            for (Feature f : Modules.ALL) {
+                if (!f.enabled || f.hudOnly) continue;
+                int fw = tr.getWidth(f.name) + 14;
+                glass(ctx, w - 6 - fw, ry, fw, 14);
+                ctx.drawTextWithShadow(tr, f.name, w - 6 - fw + 7, ry + 3, WHITE);
+                ry += 17;
+            }
+        }
+
+        // --- слева по центру: эффекты
+        if (Modules.EFFECTS.enabled) {
+            List<String[]> rows = new ArrayList<>();
+            for (var e : p.getStatusEffects()) {
+                if (e.getEffectType() == StatusEffects.NIGHT_VISION && Modules.FULLBRIGHT.enabled) continue;
+                int sec = e.getDuration() / 20;
+                String t = e.isInfinite() ? "inf" : (sec / 60) + ":" + String.format(Locale.ROOT, "%02d", sec % 60);
+                rows.add(new String[]{e.getEffectType().value().getName().getString() + " " + (e.getAmplifier() + 1), t});
+            }
+            if (!rows.isEmpty()) {
+                int pw = tr.getWidth("Effects") + 20;
+                for (String[] r : rows) pw = Math.max(pw, tr.getWidth(r[0]) + tr.getWidth(r[1]) + 28);
+                int ph = 20 + rows.size() * 12;
+                int py = h / 2 - ph / 2;
+                glass(ctx, 6, py, pw, ph);
+                ctx.drawTextWithShadow(tr, "Effects", 12, py + 5, DIM);
+                for (int i = 0; i < rows.size(); i++) {
+                    ctx.drawTextWithShadow(tr, rows.get(i)[0], 12, py + 18 + i * 12, WHITE);
+                    ctx.drawTextWithShadow(tr, rows.get(i)[1], 6 + pw - 6 - tr.getWidth(rows.get(i)[1]), py + 18 + i * 12, DIM);
+                }
+            }
+        }
+
+        // --- справа по центру: бинды
+        if (Modules.BINDS.enabled) {
+            List<String[]> rows = new ArrayList<>();
+            for (Feature f : Modules.ALL) if (f.key != -1) rows.add(new String[]{f.name, Commands.keyName(f.key)});
+            if (!rows.isEmpty()) {
+                int pw = tr.getWidth("Keys") + 20;
+                for (String[] r : rows) pw = Math.max(pw, tr.getWidth(r[0]) + tr.getWidth(r[1]) + 28);
+                int ph = 20 + rows.size() * 12;
+                int px = w - 6 - pw, py = h / 2 - ph / 2;
+                glass(ctx, px, py, pw, ph);
+                ctx.drawTextWithShadow(tr, "Keys", px + 6, py + 5, DIM);
+                for (int i = 0; i < rows.size(); i++) {
+                    ctx.drawTextWithShadow(tr, rows.get(i)[0], px + 6, py + 18 + i * 12, WHITE);
+                    ctx.drawTextWithShadow(tr, rows.get(i)[1], px + pw - 6 - tr.getWidth(rows.get(i)[1]), py + 18 + i * 12, Theme.argb());
+                }
+            }
+        }
+
+        // --- снизу слева: клавиши и CPS
+        if (Modules.KEYS.enabled) {
+            int ky = h - 62;
+            key(ctx, tr, 25, ky, "W", mc.options.forwardKey.isPressed());
+            key(ctx, tr, 6, ky + 19, "A", mc.options.leftKey.isPressed());
+            key(ctx, tr, 25, ky + 19, "S", mc.options.backKey.isPressed());
+            key(ctx, tr, 44, ky + 19, "D", mc.options.rightKey.isPressed());
+        }
+        if (Modules.CPS.enabled) pill(ctx, tr, 6, h - 22, "CPS " + cps(mc));
+
+        // --- по центру над хотбаром: предмет в руке
+        if (Modules.HELD.enabled) {
+            var st = p.getMainHandStack();
+            if (!st.isEmpty()) {
+                String n = st.getName().getString();
+                if (st.getCount() > 1) n += " x" + st.getCount();
+                int max = st.getMaxDamage();
+                if (max > 0) n += DOT + ((max - st.getDamage()) * 100 / max) + "%";
+                int pw = 20 + tr.getWidth(n.replace(DOT, "")) + tr.getWidth(DOT);
+                pill(ctx, tr, cx - pw / 2, h - 52, n);
+            }
+        }
+
+        // --- справа от хотбара: броня
+        if (Modules.ARMOR.enabled) {
+            EquipmentSlot[] slots = {EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET};
+            List<ItemStack> worn = new ArrayList<>();
+            for (EquipmentSlot sl : slots) { var st = p.getEquippedStack(sl); if (!st.isEmpty()) worn.add(st); }
+            if (!worn.isEmpty()) {
+                int bw = worn.size() * 24 + 6, bx = cx + 98, by = h - 34;
+                glass(ctx, bx, by, bw, 31);
+                for (int i = 0; i < worn.size(); i++) {
+                    var st = worn.get(i);
+                    ctx.drawItem(st, bx + 6 + i * 24, by + 3);
+                    int max = st.getMaxDamage();
+                    if (max > 0) {
+                        String pct = ((max - st.getDamage()) * 100 / max) + "%";
+                        ctx.drawTextWithShadow(tr, pct, bx + 6 + i * 24 + 8 - tr.getWidth(pct) / 2, by + 21, DIM);
+                    }
+                }
+            }
+        }
+
+        // --- снизу справа: предметы
+        if (Modules.ITEMS.enabled) {
+            net.minecraft.item.Item[] its = {Items.TOTEM_OF_UNDYING, Items.GOLDEN_APPLE, Items.ENDER_PEARL, Items.END_CRYSTAL};
+            int bw = 6;
+            int[] cnt = new int[its.length];
+            for (int i = 0; i < its.length; i++) { cnt[i] = p.getInventory().count(its[i]); bw += 20 + tr.getWidth(String.valueOf(cnt[i])) + 6; }
+            int bx = w - 6 - bw, by = h - 24;
+            glass(ctx, bx, by, bw, 20);
+            int ix = bx + 6;
+            for (int i = 0; i < its.length; i++) {
+                ctx.drawItem(new ItemStack(its[i]), ix, by + 2);
+                ctx.drawTextWithShadow(tr, String.valueOf(cnt[i]), ix + 18, by + 6, WHITE);
+                ix += 20 + tr.getWidth(String.valueOf(cnt[i])) + 6;
+            }
+        }
     }
 }
 
@@ -637,7 +801,7 @@ class ClickGuiScreen extends Screen {
                     if (f.hasValue) {
                         double t = (f.value - f.min) / (f.max - f.min);
                         int tx1 = x + 10, tx2 = x + pw - 10, kx = tx1 + (int) ((tx2 - tx1) * t);
-                        c.drawTextWithShadow(textRenderer, String.valueOf((int) f.value), x + 10, y2 + 1, argb(al, 0xFFFFFF));
+                        c.drawTextWithShadow(textRenderer, f.step < 1 ? String.format(java.util.Locale.ROOT, "%.1f", f.value) : String.valueOf((int) f.value), x + 10, y2 + 1, argb(al, 0xFFFFFF));
                         c.fill(tx1, y2 + 11, tx2, y2 + 13, argb(al, 0x2E2150));
                         c.fill(tx1, y2 + 11, kx, y2 + 13, argb(al, Theme.rgb()));
                         rrect(c, kx - 2, y2 + 9, kx + 2, y2 + 15, 2, argb(al, 0xFFFFFF));
