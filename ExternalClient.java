@@ -14,7 +14,7 @@ import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.option.CloudRenderMode;
 import net.minecraft.client.option.KeyBinding;
-import net.minecraft.client.option.ParticlesMode;
+import net.minecraft.client.option.SimpleOption;
 import net.minecraft.client.render.RenderTickCounter;
 import net.minecraft.client.util.InputUtil;
 import net.minecraft.entity.EquipmentSlot;
@@ -150,14 +150,22 @@ class NoClouds extends Feature {
 }
 
 class MinParticles extends Feature {
-    ParticlesMode old;
+    Object old;
     MinParticles() { super("Particles", "Performance"); }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
     @Override void onEnable(MinecraftClient mc) {
-        old = mc.options.getParticles().getValue();
-        mc.options.getParticles().setValue(ParticlesMode.MINIMAL);
+        SimpleOption opt = mc.options.getParticles();
+        old = opt.getValue();
+        if (old instanceof Enum<?> e) {
+            Object[] vals = e.getDeclaringClass().getEnumConstants();
+            if (vals != null && vals.length > 0) opt.setValue(vals[vals.length - 1]);
+        }
     }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
     @Override void onDisable(MinecraftClient mc) {
-        if (old != null) mc.options.getParticles().setValue(old);
+        if (old != null) ((SimpleOption) mc.options.getParticles()).setValue(old);
         old = null;
     }
 }
