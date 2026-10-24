@@ -7,6 +7,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Prepare font (Roboto, Android default)
+        run: |
+          mkdir -p assets/external/font
+          F=assets/external/font/ui.ttf
+          get() { curl -fsSL -o "$F" "$1" && file "$F" | grep -qiE 'truetype|opentype'; }
+          get "https://github.com/google/fonts/raw/main/apache/roboto/Roboto-Regular.ttf" \
+            || get "https://github.com/google/fonts/raw/main/ofl/roboto/Roboto%5Bwdth%2Cwght%5D.ttf" \
+            || { curl -fsSL "https://android.googlesource.com/platform/external/roboto-fonts/+/refs/tags/android-14.0.0_r22/RobotoStatic-Regular.ttf?format=TEXT" | base64 -d > "$F"; file "$F" | grep -qiE 'truetype|opentype'; }
+          echo '{"providers":[{"type":"ttf","file":"external:ui.ttf","size":10.0,"oversample":8.0,"shift":[0.0,0.0],"skip":""}]}' > assets/external/font/ui.json
+          ls -la assets/external/font
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
