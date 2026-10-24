@@ -255,13 +255,19 @@ class TargetFX extends Feature {
         t++;
         double x = e.getX(), y = e.getY(), z = e.getZ(), hg = e.getHeight();
         int mode = (int) value;
-        if (mode == 1) {                       // духи крутятся вокруг
-            for (int k = 0; k < 3; k++) {
-                double a = t * 0.18 + k * Math.PI * 2 / 3;
-                double yy = y + hg * 0.55 + Math.sin(t * 0.09 + k * 2) * hg * 0.35;
-                mc.world.addParticle(ParticleTypes.SOUL_FIRE_FLAME, x + Math.cos(a) * 0.85, yy, z + Math.sin(a) * 0.85, 0, 0, 0);
+        if (mode == 1) {                       // духи: две изогнутые светящиеся ленты кружат вокруг цели
+            for (int k = 0; k < 2; k++) {
+                double dir = k == 0 ? 1 : -1;     // вторая лента летит с другой стороны, наклонно
+                for (int j = 0; j < 26; j++) {
+                    if (j > 8 && j % 2 == 1) continue;
+                    if (j > 16 && j % 4 != 0) continue;
+                    double a = t * 0.16 * dir + k * Math.PI - j * 0.07 * dir;
+                    double yy = y + hg * 0.5 + Math.sin(a) * hg * 0.28 + Math.sin(t * 0.05 + k) * hg * 0.12;
+                    double px = x + Math.cos(a) * 0.9, pz = z + Math.sin(a) * 0.9;
+                    if (j < 12) mc.world.addParticle(ParticleTypes.END_ROD, px, yy, pz, 0, 0, 0);
+                    else mc.world.addParticle(ParticleTypes.WITCH, px, yy, pz, 0, 0, 0);
+                }
             }
-            if (t % 5 == 0) mc.world.addParticle(ParticleTypes.SOUL, x, y + hg * 0.5, z, 0, 0.02, 0);
         } else if (mode == 2) {                // молнии на теле
             for (int k = 0; k < 4; k++) {
                 mc.world.addParticle(ParticleTypes.ELECTRIC_SPARK,
