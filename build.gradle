@@ -16,6 +16,7 @@ sourceSets {
         resources {
             srcDirs = ['.']
             include 'fabric.mod.json'
+            include 'assets/**'
         }
     }
 }
